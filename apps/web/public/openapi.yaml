@@ -1,0 +1,1214 @@
+﻿openapi: 3.0.0
+info:
+  title: VexonAC API
+  description: |
+    Official API documentation for the VexonAC Anti-Cheat System and its network tools.
+    
+    ## Authentication
+    All API endpoints require authentication using API Keys.
+    headers:
+    - `x-api-key`: Your public Access Key
+    - `x-api-secret`: Your private Secret Key
+    
+    ## Rate Limiting & Cost
+    - Limits are applied per minute based on your API Key tier.
+    - Each endpoint has a cost associated with it. Your API Key tier determines your monthly quota.
+    - Response headers `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `X-Cost` included.
+  version: 1.0.0
+servers:
+  - url: https://api.vexonac.xyz
+    description: Production Server
+
+security:
+  - ApiKeyAuth: []
+    ApiSecretAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+    ApiSecretAuth:
+      type: apiKey
+      in: header
+      name: x-api-secret
+
+  schemas:
+    # --- Shared Models ---
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        code: { type: string }
+        status: { type: string }
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+
+    BanPublic:
+      type: object
+      properties:
+        id: { type: string }
+        player: { type: string, description: "Player Name" }
+        server: { type: string, description: "Server Name" }
+        reason: { type: string }
+        details: { type: object }
+        evidence: { type: string }
+        bannedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        bannedBy: { type: string }
+
+    ServerBanHistory:
+      type: object
+      properties:
+        player: { type: string }
+        reason: { type: string }
+        details: { type: object }
+        evidence: { type: string }
+        bannedAt: { type: string, format: date-time }
+
+    ServerLog:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        details: { type: object }
+        timestamp: { type: string, format: date-time }
+        executor: { type: string, description: "Member ID or Name" }
+        target: { type: string, description: "Player ID or License" }
+
+    AnalysisBan:
+      type: object
+      properties:
+        id: { type: string }
+        banId: { type: string }
+        reason: { type: string }
+        details: { type: object }
+        evidenceUrl: { type: string }
+        bannedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        bannedBy: { type: string }
+        server:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            isCurrentServer: { type: boolean }
+        identifiers:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              value: { type: string }
+        isDirectBan: { type: boolean }
+        isAltAccountBan: { type: boolean }
+        matchingIdentifiers: 
+          type: array
+          items: 
+             type: object
+             properties:
+               type: { type: string }
+               value: { type: string }
+        player:
+          type: object 
+          properties:
+             id: { type: string }
+             playerName: { type: string }
+             playTime: { type: integer }
+
+    PlayerAnalysis:
+      type: object
+      properties:
+        player:
+          type: object
+          properties:
+            id: { type: string }
+            playerName: { type: string }
+            playerLicense: { type: string }
+            identifiers: { type: array, items: { type: string } }
+            oldIdentifiers: { type: array, items: { type: string } }
+            firstJoin: { type: string, format: date-time }
+            lastJoin: { type: string, format: date-time }
+            playTime: { type: integer }
+        altAccounts:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              playerName: { type: string }
+              playerLicense: { type: string }
+              firstJoin: { type: string, format: date-time }
+              lastJoin: { type: string, format: date-time }
+              playTime: { type: integer }
+              server:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  isCurrentServer: { type: boolean }
+              matchingIdentifiers: { type: array, items: { type: string } }
+              identifiersCount: { type: integer }
+        playerBans:
+          type: array
+          items: { $ref: '#/components/schemas/AnalysisBan' }
+        sameServerAltBans:
+          type: array
+          items: { $ref: '#/components/schemas/AnalysisBan' }
+        crossServerBans:
+          type: array
+          items: { $ref: '#/components/schemas/AnalysisBan' }
+        bansHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              server: { type: string }
+              reason: { type: string }
+              details: { type: object }
+              evidenceUrl: { type: string }
+              bannedAt: { type: string, format: date-time }
+        threatScore:
+          type: object
+          properties:
+            score: { type: number }
+            riskLevel: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+            warnings: { type: array, items: { type: string } }
+
+tags:
+  - name: Auth
+    description: Verification & Permissions
+  - name: Keys
+    description: Usage & Quotas
+  - name: Stats
+    description: Global Platform Stats
+  - name: Bans
+    description: Global Ban Database
+  - name: Player
+    description: Player Profiles & Scoring
+  - name: Server
+    description: Server Management (Requires License Link)
+  - name: Webhooks
+    description: Coming Soon
+
+paths:
+  # ===========================
+  # AUTH
+  # ===========================
+  /v1/auth/verify:
+    post:
+      tags: [Auth]
+      summary: Verify API Credentials
+      responses:
+        200:
+          description: Credentials Valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean, example: true }
+                  key:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                      tier: { type: string }
+                      status: { type: string }
+                      createdAt: { type: string, format: date-time }
+                      expiresAt: { type: string, format: date-time }
+                  permissions: { type: object }
+                  rateLimit:
+                    type: object
+                    properties:
+                      limit: { type: integer }
+                  meta:
+                    type: object
+                    properties:
+                      requestId: { type: string }
+                      timestamp: { type: string }
+
+  # ===========================
+  # KEYS
+  # ===========================
+  /v1/keys/usage:
+    get:
+      tags: [Keys]
+      summary: Get Usage Stats
+      responses:
+        200:
+          description: Usage details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usage:
+                    type: object
+                    properties:
+                      current: { type: integer }
+                      limit: { type: integer }
+                      remaining: { type: integer }
+                      percentage: { type: number }
+                  period:
+                    type: object
+                    properties:
+                      resetDate: { type: string, format: date-time }
+                      daysRemaining: { type: integer }
+                  lifetime:
+                    type: object
+                    properties:
+                      totalRequests: { type: integer }
+                      lastUsedAt: { type: string, format: date-time }
+
+  # ===========================
+  # STATS
+  # ===========================
+  /v1/stats:
+    get:
+      tags: [Stats]
+      summary: Global System Stats
+      description: Cost 5
+      x-cost: 5
+      responses:
+        200:
+          description: Platform statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      online: { type: integer }
+                  players:
+                    type: object
+                    properties:
+                      tracked_total: { type: integer }
+                      online: { type: integer }
+                      banned_total: { type: integer }
+                  identifiers:
+                    type: object
+                    properties:
+                      tracked_total: { type: integer }
+                      banned_total: { type: integer }
+                  system:
+                    type: object
+                    properties:
+                      version: { type: string }
+                      bans_issued: { type: integer }
+                      last_update: { type: string }
+
+  # ===========================
+  # BANS (Global)
+  # ===========================
+  /v1/bans/recent:
+    get:
+      tags: [Bans]
+      summary: Recent Bans
+      description: Cost 2
+      x-cost: 2
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 10 }
+      responses:
+        200:
+          description: List of recent bans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BanPublic'
+                  meta:
+                    type: object
+                    properties:
+                      count: { type: integer }
+                      limit: { type: integer }
+
+  /v1/bans/search:
+    get:
+      tags: [Bans]
+      summary: Search Bans
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: reason
+          schema: { type: string }
+        - in: query
+          name: playerName
+          schema: { type: string }
+      responses:
+        200:
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BanPublic'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /v1/bans/stats:
+    get:
+      tags: [Bans]
+      summary: Ban Stats
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: reason
+          schema: { type: string }
+      responses:
+        200:
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filter:
+                    type: object
+                    properties:
+                      reason: { type: string, nullable: true }
+                  stats:
+                    type: object
+                    properties:
+                      active:
+                        type: object
+                        properties:
+                          last24h: { type: integer }
+                          last7d: { type: integer }
+                          last30d: { type: integer }
+                          total: { type: integer }
+                      issued:
+                        type: object
+                        properties:
+                          last24h: { type: integer }
+                          last7d: { type: integer }
+                          last30d: { type: integer }
+                          total: { type: integer }
+
+  /v1/bans/trends:
+    get:
+      tags: [Bans]
+      summary: Ban Trends
+      description: Cost 10
+      x-cost: 10
+      parameters:
+        - in: query
+          name: window
+          schema: { type: string, enum: [24h, 7d, 30d] }
+      responses:
+        200:
+          description: Trends
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  window: { type: string }
+                  since: { type: string }
+                  trends:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        reason: { type: string }
+                        count: { type: integer }
+
+  # ===========================
+  # SERVER
+  # ===========================
+  /v1/server:
+    get:
+      tags: [Server]
+      summary: Server Info
+      description: Cost 2
+      x-cost: 2
+      responses:
+        200:
+          description: Server status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ONLINE, OFFLINE, BANNED] }
+                  info:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      ip: { type: string }
+                      banner: { type: string, nullable: true }
+                      version: { type: string }
+                  stats:
+                    type: object
+                    properties:
+                      currentPlayers: { type: integer }
+                      maxSlots: { type: integer }
+                      lastSeen: { type: string, format: date-time }
+                  subscription:
+                    type: object
+                    properties:
+                      expiresAt: { type: string, format: date-time }
+
+  /v1/server/stats:
+    get:
+      tags: [Server]
+      summary: Server Statistics
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: window
+          schema: { type: string, default: 24h }
+      responses:
+        200:
+          description: Historical metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  window: { type: string }
+                  since: { type: string }
+                  current:
+                    type: object
+                    properties:
+                      players: { type: integer }
+                      online: { type: boolean }
+                  averages:
+                    type: object
+                    properties:
+                      players: { type: integer }
+                  activity:
+                    type: object
+                    properties:
+                      bansIssued: { type: integer }
+                      newBans: { type: integer }
+                      newPlayers: { type: integer }
+                      playerJoins: { type: integer }
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp: { type: string }
+                        players: { type: integer }
+                        bans: { type: integer }
+
+  /v1/server/bans:
+    get:
+      tags: [Server]
+      summary: Server Active Bans
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: reason
+          schema: { type: string }
+        - in: query
+          name: playerName
+          schema: { type: string }
+      responses:
+        200:
+          description: Active bans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BanPublic'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /v1/server/bans-history:
+    get:
+      tags: [Server]
+      summary: Server Ban History
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: reason
+          schema: { type: string }
+        - in: query
+          name: playerName
+          schema: { type: string }
+      responses:
+        200:
+          description: Ban history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServerBanHistory'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /v1/server/config:
+    get:
+      tags: [Server]
+      summary: Server Config
+      description: Cost 2
+      x-cost: 2
+      responses:
+        200:
+          description: Raw config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+
+  /v1/server/players:
+    get:
+      tags: [Server]
+      summary: Online Players List
+      description: Cost 2
+      x-cost: 2
+      responses:
+        200:
+          description: Connected players
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  players:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                      description: "Player object as returned by server resource"
+
+  /v1/server/admins:
+    get:
+      tags: [Server]
+      summary: Server Admins
+      description: Cost 2
+      x-cost: 2
+      responses:
+        200:
+          description: Admins list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  admins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        discordId: { type: string }
+                        permissions: 
+                          type: array
+                          items: { type: string }
+                        addedAt: { type: string, format: date-time }
+
+  /v1/server/logs:
+    get:
+      tags: [Server]
+      summary: Server Logs
+      description: Cost 10
+      x-cost: 10
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: type
+          schema: { type: string }
+      responses:
+        200:
+          description: Logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServerLog'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /v1/server/lookup:
+    post:
+      tags: [Server]
+      summary: Lookup Player
+      description: Cost 15
+      x-cost: 15
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier]
+              properties:
+                identifier: { type: string, description: "Steam, License, Discord, or IP" }
+      responses:
+        200:
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerAnalysis'
+        404:
+          description: Player not found
+
+  /v1/server/screenshot:
+    post:
+      tags: [Server]
+      summary: Request Screenshot
+      description: Cost 10
+      x-cost: 10
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId]
+              properties:
+                playerId: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  screenshotUrl: { type: string }
+
+  /v1/server/kick:
+    post:
+      tags: [Server]
+      summary: Kick Player
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId]
+              properties:
+                playerId: { type: string }
+                reason: { type: string }
+                by: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+
+  /v1/server/ban:
+    post:
+      tags: [Server]
+      summary: Ban Player
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, reason]
+              properties:
+                playerId: { type: string }
+                reason: { type: string }
+                duration: { type: integer }
+                evidence: { type: string }
+                by: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+
+  /v1/server/ban/offline:
+    post:
+      tags: [Server]
+      summary: Ban Player Offline
+      description: Cost 10
+      x-cost: 10
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                identifiers: 
+                  type: array
+                  items: { type: string }
+                playerLicense: { type: string }
+                reason: { type: string }
+                details: { type: object }
+                evidenceUrl: { type: string }
+                by: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  banId: { type: string }
+        404:
+          description: Player not found
+        409:
+          description: Player already banned
+
+  /v1/server/unban:
+    post:
+      tags: [Server]
+      summary: Unban Player
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [banId]
+              properties:
+                banId: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+        404:
+          description: Ban not found
+
+  /v1/server/unban/last:
+    post:
+      tags: [Server]
+      summary: Unban Last Players
+      description: Cost 10
+      x-cost: 10
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count: { type: integer, default: 1 }
+                minutes: { type: integer }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  count: { type: integer }
+                  message: { type: string }
+
+  /v1/server/unban/all:
+    post:
+      tags: [Server]
+      summary: Unban All Players
+      description: Cost 50
+      x-cost: 50
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  count: { type: integer }
+                  message: { type: string }
+
+  /v1/server/exec:
+    post:
+      tags: [Server]
+      summary: Execute Console Command
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command: { type: string }
+                by: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+        503:
+          description: Server offline
+
+  /v1/server/admin/add:
+    post:
+      tags: [Server]
+      summary: Add Admin
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discordId, permissions]
+              properties:
+                discordId: { type: string }
+                permissions: 
+                  type: array
+                  items: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  member: { type: object }
+
+  /v1/server/admin/remove:
+    post:
+      tags: [Server]
+      summary: Remove Admin
+      description: Cost 5
+      x-cost: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discordId]
+              properties:
+                discordId: { type: string }
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+
+  # ===========================
+  # PLAYER (Global)
+  # ===========================
+  /v1/player/search:
+    get:
+      tags: [Player]
+      summary: Search Players
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: query
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        license: { type: string }
+                        server: { type: string }
+                        lastSeen: { type: string, format: date-time }
+                        playTime: { type: integer }
+
+  /v1/player/{identifier}:
+    get:
+      tags: [Player]
+      summary: Player Profile
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  license: { type: string }
+                  stats:
+                    type: object
+                    properties:
+                      globalPlayTime: { type: integer }
+                      serversVisited: { type: integer }
+                      firstSeen: { type: string, format: date-time }
+                      lastSeen: { type: string, format: date-time }
+                      lastServerJoined: { type: string }
+                  bans:
+                    type: object
+                    properties:
+                      activeBans: { type: integer }
+                      totalBans: { type: integer }
+
+  /v1/player/{identifier}/servers:
+    get:
+      tags: [Player]
+      summary: Server History
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        firstJoin: { type: string, format: date-time }
+                        lastJoin: { type: string, format: date-time }
+                        playTime: { type: integer }
+
+  /v1/player/{identifier}/bans:
+    get:
+      tags: [Player]
+      summary: Player Active Bans
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Active bans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  bans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BanPublic'
+
+  /v1/player/{identifier}/bans-history:
+    get:
+      tags: [Player]
+      summary: Player Ban History
+      description: Cost 10
+      x-cost: 10
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Ban history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  bans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServerBanHistory'
+
+  /v1/player/{identifier}/threat-score:
+    get:
+      tags: [Player]
+      summary: Threat Score
+      description: Cost 5
+      x-cost: 5
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  score: { type: number }
+
+  /v1/player/{identifier}/analysis:
+    get:
+      tags: [Player]
+      summary: Player Analysis
+      description: |
+        Performs a deep analysis of the player, including alt accounts, bans, and threat score.
+        (Cost: 15)
+      x-cost: 15
+      parameters:
+        - in: path
+          name: identifier
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerAnalysis'
+
+  # ===========================
+  # WEBHOOKS
+  # ===========================
+  /v1/webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List Active Webhooks
+      description: Coming Soon
+      responses:
+        200:
+          description: Success
+    post:
+      tags: [Webhooks]
+      summary: Create Webhook
+      description: |
+        Coming Soon.
+        Events: player_banned, player_first_time_seen
+      responses:
+        200:
+          description: Success
+
+  /v1/webhooks/{id}:
+    delete:
+      tags: [Webhooks]
+      summary: Delete Webhook
+      description: Coming Soon
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        200:
+          description: Success

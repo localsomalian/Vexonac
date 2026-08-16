@@ -1,0 +1,41 @@
+{
+  "name": "vexonac-v3",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "start": "turbo start",
+    "check-types": "turbo check-types",
+    "dev:native": "turbo -F native dev",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F server dev",
+    "db:push": "turbo -F server db:push",
+    "db:studio": "turbo -F server db:studio",
+    "db:generate": "turbo -F server db:generate",
+    "db:migrate": "turbo -F server db:migrate",
+    "db:reset": "turbo -F server db:reset",
+    "db:migrate:old": "bun run migration/migration.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "turbo": "^2.9.14"
+  },
+  "packageManager": "bun@1.2.13",
+  "overrides": {
+    "prisma": "6.9.0",
+    "@prisma/client": "6.9.0"
+  },
+  "resolutions": {
+    "prisma": "6.9.0",
+    "@prisma/client": "6.9.0"
+  }
+}

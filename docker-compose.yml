@@ -1,0 +1,186 @@
+﻿services:
+  ingress:
+    build:
+      context: .
+      dockerfile: apps/ingress-api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:5000:5000"
+    networks:
+      - vexonac-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 100
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - screenshots_data:/app/screenshots
+    labels:
+      - "vexonac.service=ingress"
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:4000:4000"
+    networks:
+      - vexonac-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 200
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:4000/trpc/api/healthCheck || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "vexonac.service=server"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL
+        - NEXT_PUBLIC_APP_URL
+        - NEXT_PUBLIC_WEB_APP_WEBSOCKET_URL
+        - NEXT_PUBLIC_INGRESS_API_URL
+        - NEXT_PUBLIC_INGRESS_API_WEBSOCKET_URL
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - vexonac-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,uid=1001,gid=1001
+      - /dev/shm:size=32m,noexec,uid=1001,gid=1001
+      - /app/apps/web/.next/standalone/apps/web/.next/cache:size=256m,noexec,uid=1001,gid=1001
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 200
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "vexonac.service=web"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vexonac
+      POSTGRES_USER: vexonac
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vexonac-network
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vexonac -d vexonac"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "vexonac.service=postgres"
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - vexonac-network
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 50
+    labels:
+      - "vexonac.service=adminer"
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - vexonac-network
+    environment:
+      - PORTAINER_ADMIN_PASSWORD_FILE=/tmp/portainer_password
+    labels:
+      - "vexonac.service=portainer"
+
+volumes:
+  portainer_data:
+  postgres_data:
+  screenshots_data:
+
+networks:
+  vexonac-network:
+    driver: bridge
+

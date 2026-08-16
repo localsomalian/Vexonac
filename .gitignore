@@ -1,0 +1,37 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.cert
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build output
+apps/web/.next/
+apps/web/out/
+
+# Standalone build
+apps/web/.next/standalone/
+apps/web/.next/cache/
+
+# Server build output
+apps/server/dist/
+apps/server/build/
+
+# Prisma generated client
+packages/database/prisma/generated/
+
+# Docker / misc
+.DS_Store
+*.log
+*.tsbuildinfo
+.turbo/
+
+# Bun
+bun.lockb

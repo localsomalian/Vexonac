@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "APITier" ADD VALUE 'FREE';

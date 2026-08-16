@@ -1,0 +1,1 @@
+{"version":3,"file":"updateServerInfos.d.ts","sourceRoot":"","sources":["../../src/handlers/updateServerInfos.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,UAAU,EAAE,MAAM,gBAAgB,CAAC;AAE5C,OAAO,EAAE,MAAM,EAAE,MAAM,WAAW,CAAC;AAInC,UAAU,WAAW;IACnB,OAAO,EAAE,UAAU,EAAE,CAAC;IACtB,KAAK,EAAE,MAAM,CAAC;CACf;AA+DD,eAAO,MAAM,iBAAiB,GAAI,QAAQ,MAAM,EAAE,MAAM,WAAW,SAYlE,CAAC"}

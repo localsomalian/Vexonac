@@ -1,0 +1,631 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "./generated/client"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgres"
+  url      = env("DATABASE_URL")
+}
+
+enum Permission {
+  ALL
+  CONFIGURATION
+  DOWNLOAD_FILES
+  MANAGE_ADMINS
+  UNBAN_ALL
+  MANAGE_BANS
+  PLAYERS_LOOKUP
+  PLAYERS_KICK
+  VIEW_LOGS
+  VIEW_CONSOLE
+  RUN_COMMANDS
+  BYPASS
+}
+
+enum IdentifierType {
+  HWID
+  ROCKSTAR
+  ROCKSTAR2
+  STEAM
+  IP
+  DISCORD
+  XBOX
+  MICROSOFT
+  FINGERPRINT
+  STORAGE
+  FIVEM
+  TOKEN
+}
+
+enum SystemLogType {
+  SERVER_START
+  SERVER_RENAME
+  SERVER_RENEW
+  SERVER_CREATE
+  MEMBER_ADD
+  MEMBER_REMOVE
+  MEMBER_UPDATE
+  CONFIG_UPDATE
+  CONFIG_SHARE
+  IP_RESET
+  IP_SET
+  DOWNLOAD
+}
+
+enum ServerLogType {
+  UNBAN_ALL
+  UNBAN_PLAYER
+  BAN_PLAYER
+  KICK_PLAYER
+  KICK_ALL
+  PLAYER_JOIN
+  PLAYER_LEAVE
+  ENTITY_CREATE
+  KILL
+  EXPLOSION
+  DETECTION
+}
+
+enum LicenseType {
+  TRIAL
+  MONTHLY
+  QUARTERLY
+  BIANUALLY
+  YEARLY
+  LIFETIME
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+model Discount {
+  id String @id @default(uuid())
+  code String @unique
+  description String?
+  discountType DiscountType
+  discountAmount Int
+  discountPercentage Int
+  expiresAt DateTime?
+  autoApply Boolean @default(false)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([code])
+  @@index([autoApply, isActive, createdAt])
+
+  @@map("discounts")
+}
+
+// Auth models - moved from auth.prisma
+model User {
+  id                   String                @id @map("_id")
+  discordId            String
+  name                 String
+  username             String
+  email                String
+  emailVerified        Boolean
+  image                String?
+  isBanned             Boolean               @default(false)
+  banReason            String?
+  createdAt            DateTime
+  updatedAt            DateTime
+  sessions             Session[]
+  accounts             Account[]
+  sharedConfigurations SharedConfiguration[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @map("_id")
+  expiresAt DateTime
+  token     String
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @map("_id")
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id @map("_id")
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
+// Main application models
+model License {
+  id            String   @id @default(uuid())
+  discordId     String
+  serverIp      String?
+  serverName    String   @default("My New Server")
+  bannerUrl     String?
+  configuration Json     @default("{}")
+  notifications Json     @default("{}")
+  expiresAt     DateTime
+  isBanned      Boolean  @default(false)
+  banReason     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  licenseKey    String   @unique
+  
+  // Relations
+  serverInfo   ServerInfo?
+  serverMetrics ServerMetrics[]
+  members      Member[]
+  logs         ServerLog[]
+  bans         Ban[]
+  bansHistory  BanHistory[]
+  players      Player[]
+  apiKeys      APIKey[]
+  playerNotes    PlayerNote[]
+  trustedPlayers TrustedPlayer[]
+
+  @@index([licenseKey])
+  @@index([discordId])
+  @@index([licenseKey, serverIp, expiresAt, isBanned]) // Composite index for checkPlayer query
+  @@index([expiresAt, isBanned]) // For license validation queries
+  @@map("licenses")
+}
+
+model Member {
+  id          String       @id @default(uuid())
+  discordId   String
+  licenseId   String
+  permissions Permission[] // Array of permissions
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, discordId])
+  @@index([licenseId])
+  @@index([discordId])
+  @@map("members")
+}
+
+model RedemptionKey {
+  id          String      @id @default(uuid())
+  type        LicenseType
+  licenseKey  String      @unique
+  generatedBy String
+  createdAt   DateTime    @default(now())
+
+  @@index([licenseKey])
+  @@map("redemption_keys")
+}
+
+model Config {
+  id            String   @id @default(uuid())
+  discordId     String
+  configuration Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("configs")
+}
+
+model Version {
+  id        String   @id @default(uuid())
+  version   String   @unique
+  updatedAt DateTime @default(now()) @updatedAt
+  changelog String?
+
+  @@map("versions")
+}
+
+model ServerLog {
+  id          String       @id @default(uuid())
+  licenseId   String
+  systemType  SystemLogType?
+  serverType  ServerLogType?
+  memberId  String?
+  playerId  String?
+  playerLicense  String?
+  details     Json @default("{}")
+  createdAt   DateTime     @default(now())
+
+  // Relations
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId])
+  @@index([licenseId, createdAt, serverType])
+  @@index([createdAt])
+  @@map("server_logs")
+}
+
+model ServerInfo {
+  id           String    @id @default(uuid())
+  licenseId    String    @unique
+  version      String?
+  isOnline     Boolean   @default(false)
+  playerCount  Int       @default(0)
+  maxSlots     Int       @default(32)
+  playerList   Json      @default("[]")
+  updatedAt    DateTime  @default(now()) @updatedAt
+  lastActiveAt DateTime?
+
+  // Relations
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@map("server_infos")
+}
+
+model ServerMetrics {
+  id           String   @id @default(uuid())
+  licenseId    String
+  timestamp    DateTime
+  playerCount  Int
+  banCount     Int
+  createdAt    DateTime @default(now())
+
+  // Relations
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, timestamp]) // Prevent duplicate entries for same server at same hour
+  @@index([licenseId, timestamp]) // For efficient querying by server and time range
+  @@index([timestamp]) // For cleanup queries
+  @@map("server_metrics")
+}
+
+model GlobalStats {
+  id            String   @id @default(uuid())
+  timestamp     DateTime
+  onlineServers Int
+  onlinePlayers Int
+  totalServers  Int      // Total active (non-expired, non-banned) servers
+  createdAt     DateTime @default(now())
+
+  @@unique([timestamp]) // Prevent duplicate entries for same hour
+  @@index([timestamp]) // For efficient querying and cleanup
+  @@map("global_stats")
+}
+
+model Ban {
+  id        String    @id @default(uuid())
+  playerId  String
+  licenseId String
+  banId     String
+  reason    String?
+  details   Json
+  evidenceUrl String?
+  bannedAt  DateTime  @default(now())
+  expiresAt DateTime?
+  bannedBy  String?
+
+  // Relations
+  license     License            @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  identifiers BannedIdentifier[]
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, banId])
+  @@unique([licenseId, playerId])
+  @@index([licenseId])
+  @@index([playerId])
+  @@index([licenseId, expiresAt]) // Composite index for ban expiration filtering
+  @@index([expiresAt]) // For global ban cleanup queries
+  @@map("bans")
+}
+
+model BanHistory {
+  id String @id @default(uuid())
+  playerId String
+  licenseId String
+  reason String
+  details Json
+  evidenceUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@map("bans_history")
+  @@index([licenseId])
+  @@index([playerId])
+  @@index([reason])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model BannedIdentifier {
+  id              String         @id @default(uuid())
+  banId           String         // Foreign key to the Ban record
+  type            IdentifierType // Type of identifier (HWID, STEAM, IP, etc.)
+  value           String         // The identifier string
+
+  // Relations
+  ban Ban @relation(fields: [banId], references: [id], onDelete: Cascade)
+
+  @@unique([banId, type, value]) // Unique constraint on identifier type and value per ban
+  @@index([type, value]) // Critical index for fast ban lookups during checkPlayer
+  @@index([banId]) // Index for looking up identifiers belonging to a ban
+  @@index([value]) // Index for value-only lookups (most common case)
+  @@map("banned_identifiers")
+}
+
+model Player {
+  id              String        @id @default(uuid()) // Use UUID for Player ID
+  licenseId       String
+  playerName      String
+  playerLicense   String
+  identifiers     Json
+  oldIdentifiers  Json
+  firstJoin       DateTime      @default(now())
+  lastJoin        DateTime      @default(now())
+  playTime        Int           @default(0) // in minutes
+
+  // Relations
+  license       License       @relation(fields: [licenseId], references: [id], onDelete: Restrict)
+  bans          Ban[]
+  bansHistory   BanHistory[]
+  notes         PlayerNote[]
+
+  @@unique([licenseId, playerLicense])
+  @@index([playerLicense])
+  @@index([identifiers], type: Gin) // GIN index for JSONB identifiers - optimizes ?| operator
+  @@index([oldIdentifiers], type: Gin) // GIN index for JSONB oldIdentifiers - optimizes ?| operator
+  @@index([licenseId, lastJoin]) // Composite index for alt account searches
+  @@index([playerName]) // Index for name searches
+  @@map("players")
+}
+
+model TrustedPlayer {
+  id            String   @id @default(uuid())
+  licenseId     String
+  playerLicense String
+  note          String?
+  addedBy       String
+  addedByName   String
+  createdAt     DateTime @default(now())
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, playerLicense])
+  @@index([licenseId])
+  @@index([playerLicense])
+  @@map("trusted_players")
+}
+
+model PlayerNote {
+  id          String   @id @default(uuid())
+  playerId    String
+  licenseId   String
+  authorId    String   // discordId of the admin who wrote it
+  authorName  String
+  note        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  player  Player  @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([playerId])
+  @@index([licenseId])
+  @@map("player_notes")
+}
+
+model SharedConfiguration {
+  id            String    @id @default(cuid())
+  name          String?
+  description   String?
+  configuration Json
+  createdById   String // Foreign key to User
+  tags          String[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  expiresAt     DateTime?
+  isPublic      Boolean   @default(false)
+  importCount   Int       @default(0)
+  viewCount     Int       @default(0)
+
+  // Relations
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@index([createdAt])
+  @@index([isPublic])
+  @@index([importCount])
+  @@map("shared_configurations")
+}
+
+model PendingPayment {
+  id           String   @id @default(uuid())
+  orderId      String   @unique // Square order_id from payment link creation
+  planId       String   // Plan type: monthly, quarterly, lifetime, premium
+  customerEmail String  // Customer email address
+  amount       Int      // Payment amount in cents
+  currency     String   @default("EUR")
+  isCompleted  Boolean  @default(false)
+  deliveredLicenseKey String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([isCompleted, createdAt]) // For cleanup of old pending payments
+  @@map("pending_payments")
+}
+
+enum APITier {
+  FREE
+  BASIC      
+  PRO        
+  BUSINESS    
+  ENTERPRISE
+}
+
+enum APIStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  CANCELLED
+}
+
+model APIKey {
+  id String @id @default(uuid())
+  discordId String
+  name String?
+  accessKey String @unique
+  secretKey String @unique
+
+  tier APITier @default(FREE)
+  status APIStatus @default(ACTIVE)
+
+  monthlyRequestLimit Int @default(1000)
+  currentMonthlyUsage Int @default(0)
+  monthlyResetDate DateTime @default(now())
+
+  rateLimitPerMinute Int @default(60)
+
+  webhooks Json @default("[]")
+  permissions Json @default("{}")
+
+  expiresAt DateTime?
+
+  licenseId String?
+  license License? @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+
+  lastUsedAt DateTime?
+  totalRequests Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([licenseId, tier])
+  @@index([accessKey])
+  @@index([tier, status])
+  @@index([monthlyResetDate])
+  @@index([expiresAt])
+  @@map("api_keys")
+}
+
+model StatusIncident {
+  id         String   @id @default(cuid())
+  title      String
+  impact     String   @default("none") // none, minor, major, critical
+  status     String   @default("investigating") // investigating, identified, monitoring, resolved
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  resolvedAt DateTime?
+
+  updates StatusIncidentUpdate[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("status_incidents")
+}
+
+model StatusIncidentUpdate {
+  id         String         @id @default(cuid())
+  incident   StatusIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  incidentId String
+  message    String
+  status     String
+  createdAt  DateTime       @default(now())
+
+  @@index([incidentId])
+  @@index([createdAt])
+  @@map("status_incident_updates")
+}
+
+model StatusMaintenance {
+  id             String    @id @default(cuid())
+  title          String
+  description    String?
+  status         String    @default("scheduled") // scheduled, in_progress, completed, cancelled
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  actualEnd      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status])
+  @@index([scheduledStart])
+  @@map("status_maintenance")
+}
+
+enum GlobalBanStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model GlobalBan {
+  id           String          @id @default(uuid())
+  identifiers  String[]        // all identifiers from the banned player
+  playerName   String
+  reason       String
+  sourceServer String?         // server name that reported the ban
+  status       GlobalBanStatus @default(PENDING)
+  reviewedBy   String?         // admin user ID who reviewed
+  reviewedAt   DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([status])
+  @@index([identifiers])
+  @@map("global_bans")
+}
+
+model AdminUser {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("admin_users")
+}
+model AdminChatMessage {
+  id          String   @id @default(uuid())
+  licenseId   String
+  authorId    String
+  authorName  String
+  authorAvatar String?
+  content     String
+  messageType String   @default("text") // text, player_share, location_share, screenshot_share
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([licenseId])
+  @@index([createdAt])
+  @@map("admin_chat_messages")
+}

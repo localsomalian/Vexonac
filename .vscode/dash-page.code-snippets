@@ -1,0 +1,20 @@
+{
+  "dash-page": {
+    "scope": "typescript,typescriptreact",
+    "prefix": "dashpage",
+    "body": [
+      "\"use client\";",
+      "",
+      "import { ContentLayout } from \"@/components/content-layout\";",
+      "",
+      "export default function ${1:PageName}() {",
+      "  return (",
+      "    <ContentLayout title=\"${1:PageName}\">",
+      "      <></>",
+      "    </ContentLayout>",
+      "  );",
+      "}"
+    ],
+    "description": "Create a Dashboard page component"
+  }
+}

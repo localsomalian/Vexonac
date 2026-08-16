@@ -1,0 +1,348 @@
+name: Build and Deploy to Production
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web-changed: ${{ steps.changes.outputs.web }}
+      server-changed: ${{ steps.changes.outputs.server }}
+      ingress-changed: ${{ steps.changes.outputs.ingress }}
+      database-changed: ${{ steps.changes.outputs.database }}
+      force-build: ${{ steps.check-images.outputs.force-build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed services
+        id: changes
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+            server:
+              - 'apps/server/**'
+              - 'packages/**'
+            ingress:
+              - 'apps/ingress-api/**'
+              - 'packages/**'
+            database:
+              - 'packages/database/prisma/schema.prisma'
+              - 'packages/database/prisma/migrations/**'
+
+      - name: Check if images exist
+        id: check-images
+        run: |
+          # Check if Docker images exist in GHCR
+          if ! docker manifest inspect ghcr.io/ayznn/vexonac-v3:web-main > /dev/null 2>&1 || \
+             ! docker manifest inspect ghcr.io/ayznn/vexonac-v3:server-main > /dev/null 2>&1 || \
+             ! docker manifest inspect ghcr.io/ayznn/vexonac-v3:ingress-main > /dev/null 2>&1; then
+            echo "force-build=true" >> $GITHUB_OUTPUT
+            echo "🔄 First deployment detected - will build all services"
+          else
+            echo "force-build=false" >> $GITHUB_OUTPUT
+            echo "✅ All images exist"
+          fi
+
+  build:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build and push Web App (if changed OR first deployment)
+      - name: Build and push Web App Docker image
+        if: needs.detect-changes.outputs.web-changed == 'true' || needs.detect-changes.outputs.force-build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          tags: ghcr.io/ayznn/vexonac-v3:web-main
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      # Build and push Server API (if changed OR first deployment)
+      - name: Build and push Server API Docker image
+        if: needs.detect-changes.outputs.server-changed == 'true' || needs.detect-changes.outputs.force-build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/server/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          tags: ghcr.io/ayznn/vexonac-v3:server-main
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      # Build and push Ingress API (if changed OR first deployment)
+      - name: Build and push Ingress API Docker image
+        if: needs.detect-changes.outputs.ingress-changed == 'true' || needs.detect-changes.outputs.force-build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/ingress-api/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          tags: ghcr.io/ayznn/vexonac-v3:ingress-main
+          cache-from: type=gha,scope=ingress
+          cache-to: type=gha,mode=max,scope=ingress
+
+  deploy:
+    needs: [detect-changes, build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            # Navigate to deployment directory
+            cd /var/www/vexonac
+
+            # Login to GHCR
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Run database migrations if schema changed or force deployment
+            if [ "${{ needs.detect-changes.outputs.database-changed }}" == "true" ] || [ "${{ needs.detect-changes.outputs.force-build }}" == "true" ]; then
+              echo "🗄️ Running database migrations..."
+              
+              # Stop applications before running migrations
+              docker-compose stop web server ingress 2>/dev/null || true
+              
+              # Debug: Check if .env file exists and show DATABASE_URL (masked)
+              if [ -f .env ]; then
+                echo "✅ .env file exists"
+                echo "📍 DATABASE_URL format check:"
+                grep "DATABASE_URL" .env | sed 's/\(DATABASE_URL="postgresql:\/\/[^:]*:\)[^@]*\(@.*\)/\1***\2/' || echo "❌ DATABASE_URL not found in .env"
+              else
+                echo "❌ .env file not found"
+                ls -la
+                exit 1
+              fi
+              
+              # Load environment variables
+              set -a
+              source .env
+              set +a
+              
+              # Mark failed migration as applied to prevent errors
+              # docker run --rm \
+              # --network host \
+              # -e DATABASE_URL="$DATABASE_URL" \
+              # -e NODE_ENV="${NODE_ENV:-production}" \
+              # -w /app/packages/database \
+              # ghcr.io/ayznn/vexonac-v3:server-main \
+              # bunx prisma migrate resolve --applied 20250830060824_
+
+              # Run migrations with explicit environment variables
+              docker run --rm \
+                --network host \
+                -e DATABASE_URL="$DATABASE_URL" \
+                -e NODE_ENV="${NODE_ENV:-production}" \
+                -w /app/packages/database \
+                ghcr.io/ayznn/vexonac-v3:server-main \
+                bunx prisma migrate deploy
+              
+              if [ $? -eq 0 ]; then
+                echo "✅ Database migrations completed successfully"
+              else
+                echo "❌ Database migrations failed"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No database changes detected, skipping migrations"
+            fi
+
+            # Function to get current image digest
+            get_image_digest() {
+              local service=$1
+              docker inspect --format='{{index .RepoDigests 0}}' $(docker-compose ps -q $service 2>/dev/null) 2>/dev/null || echo "none"
+            }
+
+            # Store current image digests
+            WEB_OLD_DIGEST=$(get_image_digest web)
+            SERVER_OLD_DIGEST=$(get_image_digest server)
+            INGRESS_OLD_DIGEST=$(get_image_digest ingress)
+
+            # Determine which services to update
+            SERVICES_TO_UPDATE=""
+            FORCE_BUILD="${{ needs.detect-changes.outputs.force-build }}"
+            DATABASE_CHANGED="${{ needs.detect-changes.outputs.database-changed }}"
+
+            # If database changed, restart ALL applications
+            if [ "$DATABASE_CHANGED" == "true" ]; then
+              echo "🗄️ Database changes detected - restarting ALL applications"
+              echo "🔄 Pulling all images..."
+              docker-compose pull web server ingress
+              SERVICES_TO_UPDATE="web server ingress"
+            else
+              # If first deployment or specific service changed, update it
+              if [ "${{ needs.detect-changes.outputs.web-changed }}" == "true" ] || [ "$FORCE_BUILD" == "true" ]; then
+                echo "🔄 Pulling web image..."
+                docker-compose pull web
+                SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE web"
+              fi
+
+              if [ "${{ needs.detect-changes.outputs.server-changed }}" == "true" ] || [ "$FORCE_BUILD" == "true" ]; then
+                echo "🔄 Pulling server image..."
+                docker-compose pull server
+                SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE server"
+              fi
+
+              if [ "${{ needs.detect-changes.outputs.ingress-changed }}" == "true" ] || [ "$FORCE_BUILD" == "true" ]; then
+                echo "🔄 Pulling ingress image..."
+                docker-compose pull ingress
+                SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE ingress"
+              fi
+            fi
+
+            # Start Portainer if not running
+            if ! docker-compose ps portainer | grep -q "Up"; then
+              echo "🚀 Starting Portainer..."
+              docker-compose up -d portainer
+            fi
+
+            # Update services
+            if [ -n "$SERVICES_TO_UPDATE" ]; then
+              echo "🔄 Starting/updating services: $SERVICES_TO_UPDATE"
+              
+              # Start each service
+              for service in $SERVICES_TO_UPDATE; do
+                echo "🔄 Starting $service..."
+                
+                # Start the service
+                docker-compose up -d --no-deps $service
+                
+                # Wait for startup
+                echo "⏳ Waiting for $service to be ready..."
+                timeout=60
+                while [ $timeout -gt 0 ]; do
+                  if docker-compose ps $service | grep -q "Up"; then
+                    echo "✅ $service is running"
+                    break
+                  fi
+                  sleep 2
+                  timeout=$((timeout-2))
+                done
+                
+                if [ $timeout -le 0 ]; then
+                  echo "❌ $service failed to start"
+                  docker-compose logs $service
+                  exit 1
+                fi
+              done
+              
+              # Clean up old containers
+              docker-compose ps --filter "status=exited" -q | xargs -r docker rm
+              
+            else
+              echo "ℹ️ No services need updating"
+            fi
+
+            # Cleanup unused images and containers
+            docker image prune -f
+            docker container prune -f
+
+            echo "✅ Deployment completed successfully!"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            cd /var/www/vexonac
+
+            # Test if services are responding
+            echo "🔍 Checking service health..."
+
+            # Give services a moment to fully start
+            sleep 10
+
+            # Test each service with more lenient checks
+            if curl -s http://localhost:3000 > /dev/null 2>&1; then
+              echo "✅ Web app is responding"
+            else
+              echo "❌ Web app is not responding - checking logs:"
+              docker-compose logs --tail=20 web
+            fi
+
+            if curl -s http://localhost:4000 > /dev/null 2>&1; then
+              echo "✅ Server API is responding"
+            else
+              echo "❌ Server API is not responding - checking logs:"
+              docker-compose logs --tail=20 server
+            fi
+
+            if curl -s http://localhost:5000 > /dev/null 2>&1; then
+              echo "✅ Ingress API is responding"
+            else
+              echo "❌ Ingress API is not responding - checking logs:"
+              docker-compose logs --tail=20 ingress
+            fi
+
+            if curl -s http://localhost:9000 > /dev/null 2>&1; then
+              echo "✅ Portainer is responding"
+            else
+              echo "⚠️ Portainer is not responding"
+            fi
+
+            # Display running containers
+            echo "📊 Running containers:"
+            docker-compose ps
+
+            echo "🚀 Deployment check completed!"
+
+      - name: Deployment Summary
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            echo "📋 Deployment Summary:"
+            echo "Web App Changed: ${{ needs.detect-changes.outputs.web-changed }}"
+            echo "Server API Changed: ${{ needs.detect-changes.outputs.server-changed }}"
+            echo "Ingress API Changed: ${{ needs.detect-changes.outputs.ingress-changed }}"
+            echo "Database Changed: ${{ needs.detect-changes.outputs.database-changed }}"
+            echo "Force Build (First Deploy): ${{ needs.detect-changes.outputs.force-build }}"
+            echo ""
+            echo "🌐 Services available at:"
+            echo "- Web App: https://vexonac.com"
+            echo "- Server API: https://api.vexonac.com"
+            echo "- Ingress API: https://ingress.vexonac.com"
+            echo "- Portainer: https://vexonac.com:9000"

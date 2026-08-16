@@ -1,0 +1,1 @@
+{"version":3,"file":"webrtc.routes.d.ts","sourceRoot":"","sources":["../../src/routes/webrtc.routes.ts"],"names":[],"mappings":"AAAA,OAAO,EAAqB,MAAM,EAAE,MAAM,SAAS,CAAC;AACpD,OAAO,EAAE,MAAM,EAAE,MAAM,WAAW,CAAC;AAEnC,UAAU,mBAAmB;IAC3B,EAAE,EAAE,MAAM,CAAC;CACZ;AAcD,wBAAgB,kBAAkB,CAAC,EAAE,EAAE,EAAE,EAAE,mBAAmB,GAAG,MAAM,CA8ZtE"}
