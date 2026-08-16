@@ -35,3 +35,4 @@ packages/database/prisma/generated/
 
 # Bun
 bun.lockb
+.github/workflows/
